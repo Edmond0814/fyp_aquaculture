@@ -18,7 +18,7 @@ This sketch will wake up out of Deep Sleep when the RTC alarm goes off
 #include <avr/sleep.h>
 #include <wire.h>
 #include <DS3231.h>
-#include <SoftwareSerial.h>
+#include <AltSoftSerial.h>
 #include <String.h>
 
 #define wakePin 3  // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
@@ -34,7 +34,7 @@ uint8_t wake_intervals[4] = {0, 10, 0, 0};
 uint8_t wake_offset[2] = {0, 0};
 
 // DS3231 alarm time
-uint8_t wake_TIME[4] = {0, 0, 0, 0};
+uint8_t wake_TIME[4] = {0, 0, 1, 0};
 
 uint8_t previous_wake_TIME[4] = {0, 0, 0, 0};
 
@@ -42,27 +42,7 @@ uint8_t previous_wake_TIME[4] = {0, 0, 0, 0};
 
 struct ts t;
 
-enum _parseState
-{
-  PS_DETECT_MSG_TYPE,
-
-  PS_IGNORING_COMMAND_ECHO,
-
-  PS_HTTPACTION_TYPE,
-  PS_HTTPACTION_RESULT,
-  PS_HTTPACTION_LENGTH,
-
-  PS_HTTPREAD_LENGTH,
-  PS_HTTPREAD_CONTENT
-};
-
-byte parseState = PS_DETECT_MSG_TYPE;
-char buffer[80];
-byte pos = 0;
-
-int contentLength = 0;
-
-SoftwareSerial GSM(8, 9);
+AltSoftSerial GSM;
 
 // Standard setup( ) function
 void setup()
@@ -96,21 +76,12 @@ void loop()
   static uint8_t oldSec = 99;
   char buff[BUFF_MAX];
 
-  
+  // Get the time
+  DS3231_get(&t);
 
+  sendDataToServer();
   
-    // Get the time
-    DS3231_get(&t);
-
-    // If the seconds has changed, display the (new) time
-    if (t.sec != oldSec)
-    {
-      // display current time
-      snprintf(buff, BUFF_MAX, "%d.%02d.%02d %02d:%02d:%02d\n", t.year,
-               t.mon, t.mday, t.hour, t.min, t.sec);
-      Serial.print(buff);
-      oldSec = t.sec;
-    }
+  arduino_sleep();
 }
 
 // When wakePin is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
@@ -258,172 +229,58 @@ void arduino_sleep(){
   return;
 }
 
-void resetBuffer()
-{
-  memset(buffer, 0, sizeof(buffer));
-  pos = 0;
-}
-
 void sendGSM(const char *msg, int waitMs = 500)
 {
   GSM.println(msg);
-  delay(waitMs);
   while (GSM.available())
   {
-    parseATText(GSM.read());
+    Serial.write(char(GSM.read())); /* Print character received on to the serial monitor */
+    // Serial.println(GSM.read());
   }
+  delay(waitMs);
 }
 
-void send_data_to_server(){
-  int dioxy = random(50, 100);
-  int temp = random (20, 35);
-
-  String stringone = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
-  String stringtwo = "&dioxy=";
-  String stringthree = "\"";
-  String stringfull = stringone + temp + stringtwo + dioxy + stringthree;
-
-  return;
-}
-
-void parseATText(byte b)
+void sendDataToServer()
 {
+  String getURL = createGetURL();
+  uint8_t serverTerm = 0;
 
-  buffer[pos++] = b;
+  sendGSM("AT+SAPBR=3,1,\"APN\",\"tunetalk\"");
+  sendGSM("AT+SAPBR=1,1", 3000);
+  sendGSM("AT+SAPBR=2,1", 3000);
+  sendGSM("AT+HTTPINIT");
+  sendGSM("AT+HTTPPARA=\"CID\",1");
 
-  if (pos >= sizeof(buffer))
-    resetBuffer(); // just to be safe
-
-  /*
-   // Detailed debugging
-   Serial.println();
-   Serial.print("state = ");
-   Serial.println(state);
-   Serial.print("b = ");
-   Serial.println(b);
-   Serial.print("pos = ");
-   Serial.println(pos);
-   Serial.print("buffer = ");
-   Serial.println(buffer);*/
-
-  switch (parseState)
+  GSM.println(getURL);
+  while (GSM.available())
   {
-  case PS_DETECT_MSG_TYPE:
-  {
-    if (b == '\n')
-      resetBuffer();
-    else
-    {
-      if (pos == 3 && strcmp(buffer, "AT+") == 0)
-      {
-        parseState = PS_IGNORING_COMMAND_ECHO;
-      }
-      else if (b == ':')
-      {
-        // Serial.print("Checking message type: ");
-        // Serial.println(buffer);
-
-        if (strcmp(buffer, "+HTTPACTION:") == 0)
-        {
-          Serial.println("Received HTTPACTION");
-          parseState = PS_HTTPACTION_TYPE;
-        }
-        else if (strcmp(buffer, "+HTTPREAD:") == 0)
-        {
-          Serial.println("Received HTTPREAD");
-          parseState = PS_HTTPREAD_LENGTH;
-        }
-        resetBuffer();
-      }
-    }
+    GSM.read();
   }
-  break;
+  delay(500);
 
-  case PS_IGNORING_COMMAND_ECHO:
-  {
-    if (b == '\n')
-    {
-      Serial.print("Ignoring echo: ");
-      Serial.println(buffer);
-      parseState = PS_DETECT_MSG_TYPE;
-      resetBuffer();
-    }
-  }
-  break;
+  sendGSM("AT+HTTPACTION=0");
+  GSM.read();
 
-  case PS_HTTPACTION_TYPE:
-  {
-    if (b == ',')
-    {
-      Serial.print("HTTPACTION type is ");
-      Serial.println(buffer);
-      parseState = PS_HTTPACTION_RESULT;
-      resetBuffer();
-    }
-  }
-  break;
+  //  sendGSM("AT+HTTPREAD");
+  //  GSM.read();
 
-  case PS_HTTPACTION_RESULT:
-  {
-    if (b == ',')
-    {
-      Serial.print("HTTPACTION result is ");
-      Serial.println(buffer);
-      parseState = PS_HTTPACTION_LENGTH;
-      resetBuffer();
-    }
-  }
-  break;
+  sendGSM("AT+HTTPTERM");
+  GSM.read();
 
-  case PS_HTTPACTION_LENGTH:
-  {
-    if (b == '\n')
-    {
-      Serial.print("HTTPACTION length is ");
-      Serial.println(buffer);
+  sendGSM("AT+SAPBR=0,1");
+  GSM.read();
+}
 
-      // now request content
-      GSM.print("AT+HTTPREAD=0,");
-      GSM.println(buffer);
+String createGetURL()
+{
+  randomSeed(analogRead(0));
+  int dioxy = random(50, 100);
+  int temp = random(20, 35);
 
-      parseState = PS_DETECT_MSG_TYPE;
-      resetBuffer();
-    }
-  }
-  break;
+  String stringOne = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
+  String stringTwo = "&dioxy=";
+  String stringThree = "\"";
+  String stringFull = stringOne + temp + stringTwo + dioxy + stringThree;
 
-  case PS_HTTPREAD_LENGTH:
-  {
-    if (b == '\n')
-    {
-      contentLength = atoi(buffer);
-      Serial.print("HTTPREAD length is ");
-      Serial.println(contentLength);
-
-      Serial.print("HTTPREAD content: ");
-
-      parseState = PS_HTTPREAD_CONTENT;
-      resetBuffer();
-    }
-  }
-  break;
-
-  case PS_HTTPREAD_CONTENT:
-  {
-    // for this demo I'm just showing the content bytes in the serial monitor
-    Serial.write(b);
-
-    contentLength--;
-
-    if (contentLength <= 0)
-    {
-
-      // all content bytes have now been read
-
-      parseState = PS_DETECT_MSG_TYPE;
-      resetBuffer();
-    }
-  }
-  break;
-  }
+  return stringFull;
 }

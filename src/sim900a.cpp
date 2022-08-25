@@ -13,6 +13,7 @@ enum _parseState
 
   PS_HTTPREAD_LENGTH,
   PS_HTTPREAD_CONTENT
+
 };
 
 enum _actionState
@@ -60,22 +61,55 @@ void setup()
 
 void loop()
 {
-  unsigned long now = millis();
+  sendDataToServer();
+  Serial.println("This is the line");
+  delay(10000);
 
-  if (actionState == AS_IDLE)
-  {
-    if (now > lastActionTime + 5000)
-    {
-      sendGSM("AT+HTTPACTION=0");
-      lastActionTime = now;
-      actionState = AS_WAITING_FOR_RESPONSE;
-    }
-  }
+}
 
+void sendDataToServer(){
+  String getURL = createGetURL();
+  uint8_t serverTerm = 0;
+  
+  sendGSM("AT+SAPBR=3,1,\"APN\",\"tunetalk\"");
+  sendGSM("AT+SAPBR=1,1", 3000);
+  sendGSM("AT+HTTPINIT");
+  sendGSM("AT+HTTPPARA=\"CID\",1");
+
+  GSM.println(getURL);
   while (GSM.available())
   {
-    lastActionTime = now;
     parseATText(GSM.read());
+  }
+  delay(500);
+
+  while (serverTerm == 0){
+    unsigned long now = millis();
+
+    if (actionState == AS_IDLE)
+    {
+      if (now > lastActionTime + 5000)
+      {
+        sendGSM("AT+HTTPACTION=0");
+        lastActionTime = now;
+        actionState = AS_WAITING_FOR_RESPONSE;
+      }
+    }
+
+    while (GSM.available())
+    {
+      lastActionTime = now;
+      buffer[pos++] = GSM.read();
+
+      if (pos >= sizeof(buffer))
+        resetBuffer(); // just to be safe
+
+      if (strcmp(buffer, "+HTTPACTION:") == 0)
+      {
+        Serial.println("Received HTTPACTION");
+        actionState = AS_IDLE;
+      }
+    }
   }
 }
 
@@ -223,4 +257,17 @@ void parseATText(byte b)
   }
   break;
   }
+}
+
+String createGetURL(){
+  randomSeed(analogRead(0));
+  int dioxy = random(50, 100);
+  int temp = random(20, 35);
+
+  String stringOne = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
+  String stringTwo = "&dioxy=";
+  String stringThree = "\"";
+  String stringFull = stringOne + temp + stringTwo + dioxy + stringThree;
+
+  return stringFull;
 }
