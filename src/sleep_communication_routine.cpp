@@ -1,5 +1,5 @@
 // Do not remove the include below
-#include "Arduino_Sleep_DS3231_Wakeup.h"
+// #include "Arduino_Sleep_DS3231_Wakeup.h"
 
 /*
  Low Power SLEEP modes for Arduino UNO/Nano
@@ -16,17 +16,17 @@ This sketch will wake up out of Deep Sleep when the RTC alarm goes off
  */
 #include "Arduino.h"
 #include <avr/sleep.h>
-#include <wire.h>
-#include <DS3231.h>
+#include <Wire.h>
+#include <ds3231.h>
 #include <AltSoftSerial.h>
 #include <String.h>
 
-#define wakePin 3  // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define wakePin 3 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 
 // Set wake up intervals using Second, Minute, Hour and Day
-// wake every hour = {0, 0, 1, 0}
-// wake every 15 minutes = {0, 15, 0, 0}
-uint8_t wake_intervals[4] = {0, 10, 0, 0};
+// if alarm wake for every hour, set wake_intervals[4] = {0, 0, 1, 0}
+// if alarm wake for every 15 minutes, set wake_intervals[4] = {0, 15, 0, 0}
+uint8_t wake_intervals[4] = {0, 5, 0, 0};
 
 // Set wake up offset using Minute and Second
 // To wake every 15 minutes start from 12:05, set wake_intervals[4] = {0, 0, 15, 0}, wake_offset = {0, 5}
@@ -34,11 +34,9 @@ uint8_t wake_intervals[4] = {0, 10, 0, 0};
 uint8_t wake_offset[2] = {0, 0};
 
 // DS3231 alarm time
-uint8_t wake_TIME[4] = {0, 0, 1, 0};
+uint8_t wake_TIME[4] = {0, 0, 0, 0};
 
 uint8_t previous_wake_TIME[4] = {0, 0, 0, 0};
-
-#define BUFF_MAX 256
 
 struct ts t;
 
@@ -50,9 +48,6 @@ void setup()
   Serial.begin(9600);
   GSM.begin(9600); /* Define baud rate for software serial communication */
   Wire.begin();
-  while (!Serial)
-    ; // wait for serial
-  delay(200);
 
   // Keep pins high until we ground them
   pinMode(wakePin, INPUT_PULLUP);
@@ -66,21 +61,17 @@ void setup()
   previous_wake_TIME[1] = t.min;
   previous_wake_TIME[2] = t.hour;
 
-
   Serial.println("Setup completed.");
 }
 
 // The loop blinks an LED when not in sleep mode
 void loop()
 {
-  static uint8_t oldSec = 99;
-  char buff[BUFF_MAX];
-
   // Get the time
   DS3231_get(&t);
 
   sendDataToServer();
-  
+
   arduino_sleep();
 }
 
@@ -164,7 +155,8 @@ void setNextAlarm(void)
   DS3231_set_creg(DS3231_CONTROL_INTCN | DS3231_CONTROL_A1IE);
 }
 
-void arduino_sleep(){
+void arduino_sleep()
+{
   // Set the DS3231 alarm to wake up in X seconds
   setNextAlarm();
 
@@ -245,7 +237,7 @@ void sendDataToServer()
   String getURL = createGetURL();
   uint8_t serverTerm = 0;
 
-  sendGSM("AT+SAPBR=3,1,\"APN\",\"tunetalk\"");
+  sendGSM("AT+SAPBR=3,1,\"APN\",\"yoodo\"");
   sendGSM("AT+SAPBR=1,1", 3000);
   sendGSM("AT+SAPBR=2,1", 3000);
   sendGSM("AT+HTTPINIT");
