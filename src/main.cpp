@@ -1,19 +1,3 @@
-// Do not remove the include below
-// #include "Arduino_Sleep_DS3231_Wakeup.h"
-
-/*
- Low Power SLEEP modes for Arduino UNO/Nano
- using Atmel328P microcontroller chip.
-
- For full details see my video #115
- at https://www.youtube.com/ralphbacon
- (Direct link to video: https://TBA)
-
-This sketch will wake up out of Deep Sleep when the RTC alarm goes off
-
- All details can be found at https://github.com/ralphbacon
-
- */
 #include "Arduino.h"
 #include <avr/sleep.h>
 #include <Wire.h>
@@ -23,11 +7,8 @@ This sketch will wake up out of Deep Sleep when the RTC alarm goes off
 #include <DallasTemperature.h>
 #include <String.h>
 
-#define wakePin 3 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define ONE_WIRE_BUS 6    // define the pin for Temperature sensor (DS18B20)
-
-#define tempUpperLimit 50 // Change the temperature limit
-#define tempLowerLimit 20
+#define pwm_value 80 // make sure in the range of 0 to 255
+unsigned long long max_adc = 500, min_adc = 0;
 
 // Set wake up intervals using Second, Minute, Hour and Day
 // if alarm wake for every hour, set wake_intervals[4] = {0, 0, 1, 0}
@@ -38,6 +19,18 @@ uint8_t wake_intervals[4] = {0, 15, 0, 0};
 // To wake every 15 minutes start from 12:05, set wake_intervals[4] = {0, 0, 15, 0}, wake_offset = {0, 5}
 // will wake 12:20, 12:35, 12:50, 1:05, 1:20
 uint8_t wake_offset[2] = {0, 0};
+
+int potentiometer_pin = A0;
+#define wakePin 2 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define pwm 4
+#define dir 5
+#define ONE_WIRE_BUS 6 // define the pin for Temperature sensor (DS18B20)
+
+#define tempUpperLimit 50 // Change the temperature limit
+#define tempLowerLimit 20
+
+int potentiometer_pin = A0;
+unsigned long adcValue = 0;
 
 // DS3231 alarm time
 uint8_t wake_TIME[4] = {0, 0, 0, 0};
@@ -81,12 +74,14 @@ void loop()
 {
   float temperature_value;
 
-  // Activate motor go down code
+  // Activate motor go down
+  motor_motion(1);
 
-  //sensor cycle code
+  // sensor cycle code
   sensor_cycle(&temperature_value);
 
-  // Activate motor go up code
+  // Activate motor go up
+  motor_motion(0);
 
   sendDataToServer(temperature_value);
 
@@ -297,8 +292,49 @@ String createGetURL(float temperature_value)
   return stringFull;
 }
 
-void sensor_cycle(float *temperature_value){
+void motor_motion(uint8_t motor_dir = 1)
+{
+  // deploy sensor when motor_dir = 1 and rectract sensor when motor_dir = 9
+
+  if (motor_dir = 1)
+  {
+    while (adcValue <= max_adc)
+    {
+      // read the input on analog pin 0:
+      read_adc;
+
+      analogRead(potentiometer_pin);
+
+      digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the bottom");
+    analogWrite(pwm, 0);
+  }
+  else
+  {
+    while (adcValue >= min_adc)
+    {
+      analogRead(potentiometer_pin);
+
+      // read the input on analog pin 0:
+      read_adc;
+
+      digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the top!");
+    analogWrite(pwm, 0);
+  }
+}
+
+void sensor_cycle(float *temperature_value)
+{
   *temperature_value = sense_temperature();
+
+  // Save to sd card code below:
 }
 
 float sense_temperature()
@@ -308,9 +344,10 @@ float sense_temperature()
   const int buf_length = 10;
   float buf[buf_length];
 
+  sensors.requestTemperatures(); // read data once to remove residual voltage from previous analog readings
+
   for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
   {
-    sensors.requestTemperatures();
     buf[i] = sensors.getTempCByIndex(0);
     delay(100);
   }
@@ -321,7 +358,31 @@ float sense_temperature()
   Serial.print(avgValue);
   Serial.println(" ");
 
-  return avgValue; 
+  return avgValue;
+}
+
+float read_adc()
+{
+  float avgValue; // Store the average value of the sensor feedback
+  const int buf_length = 10;
+  float buf[buf_length];
+
+  analogRead(potentiometer_pin); // read data once to remove residual voltage from previous analog readings
+
+  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+  {
+    buf[i] = analogRead(potentiometer_pin);
+    delay(10);
+  }
+
+  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
+  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
+
+  Serial.print("ADC value:");
+  Serial.print(adcValue);
+  Serial.println(" ");
+
+  return avgValue;
 }
 
 void sort_array(float *array_value, size_t array_size)
