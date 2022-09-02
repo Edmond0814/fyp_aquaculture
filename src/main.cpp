@@ -20,7 +20,7 @@ uint8_t wake_intervals[4] = {0, 15, 0, 0};
 // will wake 12:20, 12:35, 12:50, 1:05, 1:20
 uint8_t wake_offset[2] = {0, 0};
 
-int potentiometer_pin = A0;
+#define potentiometer_pin A0
 #define wakePin 2 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define pwm 4
 #define dir 5
@@ -29,7 +29,6 @@ int potentiometer_pin = A0;
 #define tempUpperLimit 50 // Change the temperature limit
 #define tempLowerLimit 20
 
-int potentiometer_pin = A0;
 unsigned long adcValue = 0;
 
 // DS3231 alarm time
@@ -67,25 +66,6 @@ void setup()
   previous_wake_TIME[2] = t.hour;
 
   Serial.println("Setup completed.");
-}
-
-// The loop blinks an LED when not in sleep mode
-void loop()
-{
-  float temperature_value;
-
-  // Activate motor go down
-  motor_motion(1);
-
-  // sensor cycle code
-  sensor_cycle(&temperature_value);
-
-  // Activate motor go up
-  motor_motion(0);
-
-  sendDataToServer(temperature_value);
-
-  arduino_sleep();
 }
 
 // When wakePin is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
@@ -414,4 +394,23 @@ float get_avg_value(float *array_value, size_t array_size)
   avgValue = (float)avgValue / 6; // convert the analog into millivolt
 
   return avgValue;
+}
+
+// The loop blinks an LED when not in sleep mode
+void loop()
+{
+  float temperature_value;
+
+  // Activate motor go down
+  motor_motion(1);
+
+  // sensor cycle code
+  sensor_cycle(&temperature_value);
+
+  // Activate motor go up
+  motor_motion(0);
+
+  sendDataToServer(temperature_value);
+
+  arduino_sleep();
 }
