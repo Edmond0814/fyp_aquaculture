@@ -1,37 +1,36 @@
-// Do not remove the include below
-// #include "Arduino_Sleep_DS3231_Wakeup.h"
-
-/*
- Low Power SLEEP modes for Arduino UNO/Nano
- using Atmel328P microcontroller chip.
-
- For full details see my video #115
- at https://www.youtube.com/ralphbacon
- (Direct link to video: https://TBA)
-
-This sketch will wake up out of Deep Sleep when the RTC alarm goes off
-
- All details can be found at https://github.com/ralphbacon
-
- */
 #include "Arduino.h"
 #include <avr/sleep.h>
 #include <Wire.h>
 #include <ds3231.h>
 #include <AltSoftSerial.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <String.h>
 
-#define wakePin 3 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define pwm_value 80  // make sure in the range of 0 to 255
+unsigned long long max_adc = 500, min_adc = 0;
 
 // Set wake up intervals using Second, Minute, Hour and Day
 // if alarm wake for every hour, set wake_intervals[4] = {0, 0, 1, 0}
 // if alarm wake for every 15 minutes, set wake_intervals[4] = {0, 15, 0, 0}
-uint8_t wake_intervals[4] = {0, 5, 0, 0};
+uint8_t wake_intervals[4] = {0, 15, 0, 0};
 
 // Set wake up offset using Minute and Second
 // To wake every 15 minutes start from 12:05, set wake_intervals[4] = {0, 0, 15, 0}, wake_offset = {0, 5}
 // will wake 12:20, 12:35, 12:50, 1:05, 1:20
 uint8_t wake_offset[2] = {0, 0};
+
+int potentiometer_pin = A0;
+#define wakePin 2      // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
+#define pwm 4
+#define dir 5
+#define ONE_WIRE_BUS 6 // define the pin for Temperature sensor (DS18B20)
+
+#define tempUpperLimit 50 // Change the temperature limit
+#define tempLowerLimit 20
+
+int potentiometer_pin = A0;
+unsigned long adcValue = 0;
 
 // DS3231 alarm time
 uint8_t wake_TIME[4] = {0, 0, 0, 0};
@@ -40,7 +39,13 @@ uint8_t previous_wake_TIME[4] = {0, 0, 0, 0};
 
 struct ts t;
 
+// Setup a softserial instance
 AltSoftSerial GSM;
+
+// Setup a oneWire instance to communicate with any OneWire devices
+OneWire oneWire(ONE_WIRE_BUS);
+// Pass our oneWire reference to Dallas Temperature.
+DallasTemperature sensors(&oneWire);
 
 // Standard setup( ) function
 void setup()
@@ -67,10 +72,18 @@ void setup()
 // The loop blinks an LED when not in sleep mode
 void loop()
 {
-  // Get the time
-  DS3231_get(&t);
+  float temperature_value;
 
-  sendDataToServer();
+  // Activate motor go down
+  motor_motion(1);
+
+  // sensor cycle code
+  sensor_cycle(&temperature_value);
+
+  // Activate motor go up
+  motor_motion(0);
+
+  sendDataToServer(temperature_value);
 
   arduino_sleep();
 }
@@ -98,6 +111,9 @@ void setNextAlarm(void)
   // A1M4 (day)     (0 to enable, 1 to disable)
   // DY/DT          (dayofweek == 1/dayofmonth == 0)
   uint8_t flags[5] = {0, 0, 0, 1, 1};
+
+  // Get the time
+  DS3231_get(&t);
 
   for (int i = 0; i < 4; i++)
   {
@@ -232,9 +248,9 @@ void sendGSM(const char *msg, int waitMs = 500)
   delay(waitMs);
 }
 
-void sendDataToServer()
+void sendDataToServer(float temperature_value)
 {
-  String getURL = createGetURL();
+  String getURL = createGetURL(temperature_value);
   uint8_t serverTerm = 0;
 
   sendGSM("AT+SAPBR=3,1,\"APN\",\"yoodo\"");
@@ -263,16 +279,137 @@ void sendDataToServer()
   GSM.read();
 }
 
-String createGetURL()
+String createGetURL(float temperature_value)
 {
   randomSeed(analogRead(0));
   int dioxy = random(50, 100);
-  int temp = random(20, 35);
 
   String stringOne = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
   String stringTwo = "&dioxy=";
   String stringThree = "\"";
-  String stringFull = stringOne + temp + stringTwo + dioxy + stringThree;
+  String stringFull = stringOne + temperature_value + stringTwo + dioxy + stringThree;
 
   return stringFull;
+}
+
+void motor_motion(uint8_t motor_dir = 1){
+  //deploy sensor when motor_dir = 1 and rectract sensor when motor_dir = 9
+
+  if (motor_dir = 1){
+    while (adcValue <= max_adc)
+    {
+      // read the input on analog pin 0:
+      read_adc;
+
+      analogRead(potentiometer_pin);
+
+      digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the bottom");
+    analogWrite(pwm, 0);
+  }
+  else{
+    while (adcValue >= min_adc)
+    {
+      analogRead(potentiometer_pin);
+
+      // read the input on analog pin 0:
+      read_adc;
+
+      digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor 
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the top!");
+    analogWrite(pwm, 0);
+  }
+}
+
+void sensor_cycle(float *temperature_value)
+{
+  *temperature_value = sense_temperature();
+
+  // Save to sd card code below:
+}
+
+float sense_temperature()
+{
+
+  float avgValue; // Store the average value of the sensor feedback
+  const int buf_length = 10;
+  float buf[buf_length];
+
+  sensors.requestTemperatures(); // read data once to remove residual voltage from previous analog readings
+
+  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+  {
+    buf[i] = sensors.getTempCByIndex(0);
+    delay(100);
+  }
+  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
+  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
+
+  Serial.print("temperature value:");
+  Serial.print(avgValue);
+  Serial.println(" ");
+
+  return avgValue;
+}
+
+float read_adc()
+{
+  float avgValue; // Store the average value of the sensor feedback
+  const int buf_length = 10;
+  float buf[buf_length];
+
+  analogRead(potentiometer_pin); //read data once to remove residual voltage from previous analog readings
+
+  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+  {
+    buf[i] = analogRead(potentiometer_pin);
+    delay(10);
+  }
+
+  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
+  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
+  
+
+  Serial.print("ADC value:");
+  Serial.print(adcValue);
+  Serial.println(" ");
+
+  return avgValue;
+}
+
+void sort_array(float *array_value, size_t array_size)
+{
+
+  int temp;
+
+  for (int i = 0; i < array_size - 1; i++) // sort the analog from small to large
+  {
+    for (int j = i + 1; j < array_size; j++)
+    {
+      if (array_value[i] > array_value[j])
+      {
+        temp = array_value[i];
+        array_value[i] = array_value[j];
+        array_value[j] = temp;
+      }
+    }
+  }
+
+  return;
+}
+
+float get_avg_value(float *array_value, size_t array_size)
+{
+  float avgValue = 0;
+  for (int i = 2; i < 8; i++) // take the average value of 6 center sample
+    avgValue += array_value[i];
+  avgValue = (float)avgValue / 6; // convert the analog into millivolt
+
+  return avgValue;
 }
