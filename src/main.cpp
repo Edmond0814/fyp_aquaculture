@@ -6,6 +6,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <String.h>
+#include <Alarm.h>
 
 #define pwm_value 80 // make sure in the range of 0 to 255
 unsigned long long max_adc = 500, min_adc = 0;
@@ -20,6 +21,10 @@ uint8_t wake_intervals[4] = {0, 15, 0, 0};
 // will wake 12:20, 12:35, 12:50, 1:05, 1:20
 uint8_t wake_offset[2] = {0, 0};
 
+// Set time tolerance which if the time that Arduino wakes up doesn't match the time, it will not initiate a new cycle
+// Using {Second, Minute, Hour}
+uint8_t wake_tolerance[3] = {0, 2, 0};
+
 #define potentiometer_pin A0
 #define wakePin 2 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
 #define pwm 4
@@ -29,16 +34,15 @@ uint8_t wake_offset[2] = {0, 0};
 #define tempUpperLimit 50 // Change the temperature limit
 #define tempLowerLimit 20
 
-#define timeTolerance 2
 
 unsigned long adcValue = 0;
 
 // DS3231 alarm time
-uint8_t wake_TIME[4] = {0, 0, 0, 0};
+// uint8_t wake_TIME[4] = {0, 0, 0, 0};
 
-uint8_t current_TIME[4] = {0, 0, 0, 0};
+// uint8_t current_TIME[4] = {0, 0, 0, 0};
 
-struct ts t;
+// struct ts t;
 
 // Setup a softserial instance
 AltSoftSerial GSM;
@@ -62,10 +66,10 @@ void setup()
   DS3231_init(DS3231_CONTROL_INTCN);
   DS3231_clear_a1f();
 
-  DS3231_get(&t);
-  current_TIME[0] = t.sec;
-  current_TIME[1] = t.min;
-  current_TIME[2] = t.hour;
+  // DS3231_get(&t);
+  // current_TIME[0] = t.sec;
+  // current_TIME[1] = t.min;
+  // current_TIME[2] = t.hour;
 
   Serial.println("Setup completed.");
 }
@@ -202,77 +206,77 @@ void sensor_cycle(float *temperature_value)
 }
 
 // Set the next alarm
-void setNextAlarm(void)
-{
-  // flags define what calendar component to be checked against the current time in order
-  // to trigger the alarm - see datasheet
-  // A1M1 (seconds) (0 to enable, 1 to disable)
-  // A1M2 (minutes) (0 to enable, 1 to disable)
-  // A1M3 (hour)    (0 to enable, 1 to disable)
-  // A1M4 (day)     (0 to enable, 1 to disable)
-  // DY/DT          (dayofweek == 1/dayofmonth == 0)
-  uint8_t flags[5] = {0, 0, 0, 1, 1};
+// void setNextAlarm(void)
+// {
+//   // flags define what calendar component to be checked against the current time in order
+//   // to trigger the alarm - see datasheet
+//   // A1M1 (seconds) (0 to enable, 1 to disable)
+//   // A1M2 (minutes) (0 to enable, 1 to disable)
+//   // A1M3 (hour)    (0 to enable, 1 to disable)
+//   // A1M4 (day)     (0 to enable, 1 to disable)
+//   // DY/DT          (dayofweek == 1/dayofmonth == 0)
+//   uint8_t flags[5] = {0, 0, 0, 1, 1};
 
-  for (int i = 0; i < 4; i++)
-  {
-    wake_TIME[i] = current_TIME[i];
-    wake_TIME[i] = wake_TIME[i] + wake_intervals[i];
-  }
+//   for (int i = 0; i < 4; i++)
+//   {
+//     wake_TIME[i] = current_TIME[i];
+//     wake_TIME[i] = wake_TIME[i] + wake_intervals[i];
+//   }
 
-  for (int i = 0; i < 2; i++)
-  {
+//   for (int i = 0; i < 2; i++)
+//   {
 
-    // calculate second and hour offset
-    if (wake_intervals[i] != 0)
-    {
-      wake_TIME[i] = wake_TIME[i] - wake_TIME[i] % wake_intervals[i];
-      wake_TIME[i] = wake_TIME[i] + wake_offset[i];
-    }
-    else
-    {
-      wake_TIME[i] = wake_offset[i];
-    }
+//     // calculate second and hour offset
+//     if (wake_intervals[i] != 0)
+//     {
+//       wake_TIME[i] = wake_TIME[i] - wake_TIME[i] % wake_intervals[i];
+//       wake_TIME[i] = wake_TIME[i] + wake_offset[i];
+//     }
+//     else
+//     {
+//       wake_TIME[i] = wake_offset[i];
+//     }
 
-    // overflow increment for seconds and minutes
-    if (wake_TIME[i] > 59)
-    {
-      wake_TIME[i + 1] = wake_TIME[i + 1] + 1;
-      wake_TIME[i] = wake_TIME[i] - 60;
-    }
-  }
+//     // overflow increment for seconds and minutes
+//     if (wake_TIME[i] > 59)
+//     {
+//       wake_TIME[i + 1] = wake_TIME[i + 1] + 1;
+//       wake_TIME[i] = wake_TIME[i] - 60;
+//     }
+//   }
 
-  // overflow increment for hours
-  if (wake_TIME[2] > 23)
-  {
-    wake_TIME[2] = wake_TIME[2] - 24;
-  }
+//   // overflow increment for hours
+//   if (wake_TIME[2] > 23)
+//   {
+//     wake_TIME[2] = wake_TIME[2] - 24;
+//   }
 
-  for (int i = 0; i < 4; i++)
-  {
-    current_TIME[i] = wake_TIME[i];
-  }
+//   for (int i = 0; i < 4; i++)
+//   {
+//     current_TIME[i] = wake_TIME[i];
+//   }
 
-  Serial.println("Next wake time");
-  Serial.print(wake_TIME[2], DEC);
-  Serial.print(':');
-  Serial.print(wake_TIME[1], DEC);
-  Serial.print(':');
-  Serial.print(wake_TIME[0], DEC);
-  Serial.println();
+//   Serial.println("Next wake time");
+//   Serial.print(wake_TIME[2], DEC);
+//   Serial.print(':');
+//   Serial.print(wake_TIME[1], DEC);
+//   Serial.print(':');
+//   Serial.print(wake_TIME[0], DEC);
+//   Serial.println();
 
-  delay(5000);
+//   delay(5000);
 
-  // Set the alarm time (but not yet activated)
-  DS3231_set_a1(wake_TIME[0], wake_TIME[1], wake_TIME[2], 0, flags);
+//   // Set the alarm time (but not yet activated)
+//   DS3231_set_a1(wake_TIME[0], wake_TIME[1], wake_TIME[2], 0, flags);
 
-  // Turn the alarm on
-  DS3231_set_creg(DS3231_CONTROL_INTCN | DS3231_CONTROL_A1IE);
-}
+//   // Turn the alarm on
+//   DS3231_set_creg(DS3231_CONTROL_INTCN | DS3231_CONTROL_A1IE);
+// }
 
 void arduino_sleep()
 {
   // Set the DS3231 alarm to wake up in X seconds
-  setNextAlarm();
+  setNextAlarm(wake_intervals, wake_offset);
 
   // Disable the ADC (Analog to digital converter, pins A0 [14] to A5 [19])
   static byte prevADCSRA = ADCSRA;
@@ -415,7 +419,7 @@ void loop()
 {
   float temperature_value;
 
-  // check_time();
+  check_time(wake_intervals, wake_offset, wake_tolerance);
 
   // Activate motor go down
   motor_motion(1);
