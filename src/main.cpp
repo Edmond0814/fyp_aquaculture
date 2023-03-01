@@ -29,12 +29,14 @@ uint8_t wake_offset[2] = {0, 0};
 #define tempUpperLimit 50 // Change the temperature limit
 #define tempLowerLimit 20
 
+#define timeTolerance 2
+
 unsigned long adcValue = 0;
 
 // DS3231 alarm time
 uint8_t wake_TIME[4] = {0, 0, 0, 0};
 
-uint8_t previous_wake_TIME[4] = {0, 0, 0, 0};
+uint8_t current_TIME[4] = {0, 0, 0, 0};
 
 struct ts t;
 
@@ -61,11 +63,90 @@ void setup()
   DS3231_clear_a1f();
 
   DS3231_get(&t);
-  previous_wake_TIME[0] = t.sec;
-  previous_wake_TIME[1] = t.min;
-  previous_wake_TIME[2] = t.hour;
+  current_TIME[0] = t.sec;
+  current_TIME[1] = t.min;
+  current_TIME[2] = t.hour;
 
   Serial.println("Setup completed.");
+}
+
+void sort_array(float *array_value, size_t array_size)
+{
+
+  uint8_t temp;
+
+  for (uint8_t i = 0; i < array_size - 1; i++) // sort the analog from small to large
+  {
+    for (uint8_t j = i + 1; j < array_size; j++)
+    {
+      if (array_value[i] > array_value[j])
+      {
+        temp = array_value[i];
+        array_value[i] = array_value[j];
+        array_value[j] = temp;
+      }
+    }
+  }
+
+  return;
+}
+
+float get_avg_value(float *array_value, size_t array_size)
+{
+  float avgValue = 0;
+  for (int i = 2; i < 8; i++) // take the average value of 6 center sample
+    avgValue += array_value[i];
+  avgValue = (float)avgValue / 6; // convert the analog into millivolt
+
+  return avgValue;
+}
+
+float read_adc()
+{
+  float avgValue; // Store the average value of the sensor feedback
+  const int buf_length = 10;
+  float buf[buf_length];
+
+  analogRead(potentiometer_pin); // read data once to remove residual voltage from previous analog readings
+
+  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+  {
+    buf[i] = analogRead(potentiometer_pin);
+    delay(10);
+  }
+
+  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
+  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
+
+  Serial.print("ADC value:");
+  Serial.print(adcValue);
+  Serial.println(" ");
+
+  return avgValue;
+}
+
+float sense_temperature()
+{
+
+  float avgValue; // Store the average value of the sensor feedback
+  const int buf_length = 10;
+  float buf[buf_length];
+
+  sensors.requestTemperatures(); // read data once to remove residual voltage from previous analog readings
+
+  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
+  {
+    buf[i] = sensors.getTempCByIndex(0);
+    delay(100);
+  }
+  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
+  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
+
+  Serial.print("temperature value:");
+  Serial.print(avgValue);
+  Serial.println(" ");
+
+  return avgValue;
 }
 
 // When wakePin is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
@@ -80,6 +161,46 @@ void sleepISR()
   // Now we continue running the main Loop() just after we went to sleep
 }
 
+String createGetURL(float temperature_value)
+{
+  randomSeed(analogRead(0));
+  // int dioxy = random(50, 100);
+  int dioxy = 0;
+
+  String stringOne = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
+  String stringTwo = "&dioxy=";
+  String stringThree = "\"";
+  String stringFull = stringOne + temperature_value + stringTwo + dioxy + stringThree;
+
+  return stringFull;
+}
+
+// int check_time(){
+
+//   for (int i = 3; i >= 0; i--){
+//     if (wake_intervals[i] != 0){
+//       int time_modulus = current_TIME[i] % wake_intervals[i];
+//       int time_diff = wake_intervals[i] - time_modulus;
+
+//       if (i < 3 && i != 0){
+//         if (time_modulus != 0)
+//           current_TIME[i - 1] += time_modulus * 60;
+//       }
+
+//       // if (time_modulus > timeTolerance && time_diff > timeTolerance){
+//       //   arduino_sleep();
+//       // }
+//     }
+//   }
+// }
+
+void sensor_cycle(float *temperature_value)
+{
+  *temperature_value = sense_temperature();
+
+  // Save to sd card code below:
+}
+
 // Set the next alarm
 void setNextAlarm(void)
 {
@@ -92,12 +213,9 @@ void setNextAlarm(void)
   // DY/DT          (dayofweek == 1/dayofmonth == 0)
   uint8_t flags[5] = {0, 0, 0, 1, 1};
 
-  // Get the time
-  DS3231_get(&t);
-
   for (int i = 0; i < 4; i++)
   {
-    wake_TIME[i] = previous_wake_TIME[i];
+    wake_TIME[i] = current_TIME[i];
     wake_TIME[i] = wake_TIME[i] + wake_intervals[i];
   }
 
@@ -131,7 +249,7 @@ void setNextAlarm(void)
 
   for (int i = 0; i < 4; i++)
   {
-    previous_wake_TIME[i] = wake_TIME[i];
+    current_TIME[i] = wake_TIME[i];
   }
 
   Serial.println("Next wake time");
@@ -231,7 +349,6 @@ void sendGSM(const char *msg, int waitMs = 500)
 void sendDataToServer(float temperature_value)
 {
   String getURL = createGetURL(temperature_value);
-  uint8_t serverTerm = 0;
 
   sendGSM("AT+SAPBR=3,1,\"APN\",\"yoodo\"");
   sendGSM("AT+SAPBR=1,1", 3000);
@@ -249,9 +366,6 @@ void sendDataToServer(float temperature_value)
   sendGSM("AT+HTTPACTION=0");
   GSM.read();
 
-  //  sendGSM("AT+HTTPREAD");
-  //  GSM.read();
-
   sendGSM("AT+HTTPTERM");
   GSM.read();
 
@@ -259,31 +373,18 @@ void sendDataToServer(float temperature_value)
   GSM.read();
 }
 
-String createGetURL(float temperature_value)
-{
-  randomSeed(analogRead(0));
-  int dioxy = random(50, 100);
-
-  String stringOne = "AT+HTTPPARA=\"URL\",\"http://45.127.4.18:60288/endpoint2?temp=";
-  String stringTwo = "&dioxy=";
-  String stringThree = "\"";
-  String stringFull = stringOne + temperature_value + stringTwo + dioxy + stringThree;
-
-  return stringFull;
-}
-
 void motor_motion(uint8_t motor_dir = 1)
 {
   // deploy sensor when motor_dir = 1 and rectract sensor when motor_dir = 9
 
-  if (motor_dir = 1)
+  if (motor_dir == 1)
   {
     while (adcValue <= max_adc)
     {
-      // read the input on analog pin 0:
-      read_adc;
-
       analogRead(potentiometer_pin);
+
+      // read the input on analog pin 0:
+      adcValue = read_adc();
 
       digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
       analogWrite(pwm, pwm_value); // Send PWM to output pin
@@ -299,7 +400,7 @@ void motor_motion(uint8_t motor_dir = 1)
       analogRead(potentiometer_pin);
 
       // read the input on analog pin 0:
-      read_adc;
+      adcValue = read_adc();
 
       digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor
       analogWrite(pwm, pwm_value); // Send PWM to output pin
@@ -310,96 +411,11 @@ void motor_motion(uint8_t motor_dir = 1)
   }
 }
 
-void sensor_cycle(float *temperature_value)
-{
-  *temperature_value = sense_temperature();
-
-  // Save to sd card code below:
-}
-
-float sense_temperature()
-{
-
-  float avgValue; // Store the average value of the sensor feedback
-  const int buf_length = 10;
-  float buf[buf_length];
-
-  sensors.requestTemperatures(); // read data once to remove residual voltage from previous analog readings
-
-  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
-  {
-    buf[i] = sensors.getTempCByIndex(0);
-    delay(100);
-  }
-  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
-  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
-
-  Serial.print("temperature value:");
-  Serial.print(avgValue);
-  Serial.println(" ");
-
-  return avgValue;
-}
-
-float read_adc()
-{
-  float avgValue; // Store the average value of the sensor feedback
-  const int buf_length = 10;
-  float buf[buf_length];
-
-  analogRead(potentiometer_pin); // read data once to remove residual voltage from previous analog readings
-
-  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
-  {
-    buf[i] = analogRead(potentiometer_pin);
-    delay(10);
-  }
-
-  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
-  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
-
-  Serial.print("ADC value:");
-  Serial.print(adcValue);
-  Serial.println(" ");
-
-  return avgValue;
-}
-
-void sort_array(float *array_value, size_t array_size)
-{
-
-  int temp;
-
-  for (int i = 0; i < array_size - 1; i++) // sort the analog from small to large
-  {
-    for (int j = i + 1; j < array_size; j++)
-    {
-      if (array_value[i] > array_value[j])
-      {
-        temp = array_value[i];
-        array_value[i] = array_value[j];
-        array_value[j] = temp;
-      }
-    }
-  }
-
-  return;
-}
-
-float get_avg_value(float *array_value, size_t array_size)
-{
-  float avgValue = 0;
-  for (int i = 2; i < 8; i++) // take the average value of 6 center sample
-    avgValue += array_value[i];
-  avgValue = (float)avgValue / 6; // convert the analog into millivolt
-
-  return avgValue;
-}
-
-// The loop blinks an LED when not in sleep mode
 void loop()
 {
   float temperature_value;
+
+  // check_time();
 
   // Activate motor go down
   motor_motion(1);
