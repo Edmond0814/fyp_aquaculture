@@ -18,24 +18,36 @@ void getCurrentTime(){
   current_TIME[2] = t.hour;
 }
 
-boolean check_time(uint8_t wake_intervals[4], uint8_t wake_offset[2], uint8_t wake_tolerance[3])
+boolean check_time(uint8_t wake_intervals[4], uint8_t wake_offset[2], uint8_t wake_tolerance)
 {
-  long total_seconds;
-  for (int i = 3; i >= 0; i--){
-    total_seconds += wake_intervals[i] * 60;
-  }
-  for (int i = 3; i >= 0; i--){
-    if (wake_intervals[i] != 0){
-      int time_modulus = current_TIME[i] % wake_intervals[i];
-      // int time_diff = wake_intervals[i] - time_modulus;
+  // put your main code here, to run repeatedly:
+  // since tolerance means +-, so this is calculate the time distance from the previous and next interval
 
-      if (i < 3 && i != 0){
-        if (time_modulus != 0)
-          current_TIME[i - 1] += time_modulus * 60;
-      } 
-    }
+  long tolerance_seconds = wake_tolerance * 60;
+  long previous_interval = 0;
+  long next_interval = 0;
+
+  for (int i = 2; i >= 0; i--)
+  {
+    int time_modulus = 0;
+    int time_diff = 0;
+
+    time_modulus = current_TIME[i] % wake_intervals[i];
+    time_diff = wake_intervals[i] - time_modulus;
+
+    previous_interval = previous_interval * 60 + time_modulus;
+    next_interval = next_interval * 60 + time_diff;
   }
-  return true;
+
+  // if both previous and next interval distance is more than tolerance seconds means do not deploy
+  if (previous_interval > tolerance_seconds && next_interval > tolerance_seconds)
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
 }
 
 void setNextAlarm(uint8_t wake_intervals[4], uint8_t wake_offset[2])

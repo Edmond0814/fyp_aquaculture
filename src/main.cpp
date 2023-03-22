@@ -8,13 +8,13 @@
 #include <String.h>
 #include <Alarm.h>
 
-#define pwm_value 80 // make sure in the range of 0 to 255
-unsigned long long max_adc = 500, min_adc = 0;
+#define pwm_value 200 // make sure in the range of 0 to 255
+unsigned long long max_adc = 440, min_adc = 300;
 
 // Set wake up intervals using Second, Minute, Hour and Day
 // if alarm wake for every hour, set wake_intervals[4] = {0, 0, 1, 0}
 // if alarm wake for every 15 minutes, set wake_intervals[4] = {0, 15, 0, 0}
-uint8_t wake_intervals[4] = {0, 15, 0, 0};
+uint8_t wake_intervals[4] = {0, 2, 0, 0};
 
 // Set wake up offset using Minute and Second
 // To wake every 15 minutes start from 12:05, set wake_intervals[4] = {0, 0, 15, 0}, wake_offset = {0, 5}
@@ -22,27 +22,19 @@ uint8_t wake_intervals[4] = {0, 15, 0, 0};
 uint8_t wake_offset[2] = {0, 0};
 
 // Set time tolerance which if the time that Arduino wakes up doesn't match the time, it will not initiate a new cycle
-// Using {Second, Minute, Hour}
-uint8_t wake_tolerance[3] = {0, 2, 0};
+// Using minutes
+uint8_t tolerance_minutes = 3;
 
 #define potentiometer_pin A0
 #define wakePin 2 // when low, makes 328P wake up, must be an interrupt pin (2 or 3 on ATMEGA328P)
-#define pwm 4
-#define dir 5
+#define pwm 3
+#define dir 4
 #define ONE_WIRE_BUS 6 // define the pin for Temperature sensor (DS18B20)
 
 #define tempUpperLimit 50 // Change the temperature limit
 #define tempLowerLimit 20
 
-
 unsigned long adcValue = 0;
-
-// DS3231 alarm time
-// uint8_t wake_TIME[4] = {0, 0, 0, 0};
-
-// uint8_t current_TIME[4] = {0, 0, 0, 0};
-
-// struct ts t;
 
 // Setup a softserial instance
 AltSoftSerial GSM;
@@ -61,15 +53,13 @@ void setup()
 
   // Keep pins high until we ground them
   pinMode(wakePin, INPUT_PULLUP);
+  pinMode(dir, OUTPUT);
 
   // Clear the current alarm (puts DS3231 INT high)
   DS3231_init(DS3231_CONTROL_INTCN);
   DS3231_clear_a1f();
 
-  // DS3231_get(&t);
-  // current_TIME[0] = t.sec;
-  // current_TIME[1] = t.min;
-  // current_TIME[2] = t.hour;
+  getCurrentTime();
 
   Serial.println("Setup completed.");
 }
@@ -101,30 +91,6 @@ float get_avg_value(float *array_value, size_t array_size)
   for (int i = 2; i < 8; i++) // take the average value of 6 center sample
     avgValue += array_value[i];
   avgValue = (float)avgValue / 6; // convert the analog into millivolt
-
-  return avgValue;
-}
-
-float read_adc()
-{
-  float avgValue; // Store the average value of the sensor feedback
-  const int buf_length = 10;
-  float buf[buf_length];
-
-  analogRead(potentiometer_pin); // read data once to remove residual voltage from previous analog readings
-
-  for (int i = 0; i < 10; i++) // Get 10 sample value from the sensor for smooth the value
-  {
-    buf[i] = analogRead(potentiometer_pin);
-    delay(10);
-  }
-
-  sort_array(buf, sizeof(buf) / sizeof(buf[0]));
-  avgValue = get_avg_value(buf, sizeof(buf) / sizeof(buf[0]));
-
-  Serial.print("ADC value:");
-  Serial.print(adcValue);
-  Serial.println(" ");
 
   return avgValue;
 }
@@ -179,99 +145,12 @@ String createGetURL(float temperature_value)
   return stringFull;
 }
 
-// int check_time(){
-
-//   for (int i = 3; i >= 0; i--){
-//     if (wake_intervals[i] != 0){
-//       int time_modulus = current_TIME[i] % wake_intervals[i];
-//       int time_diff = wake_intervals[i] - time_modulus;
-
-//       if (i < 3 && i != 0){
-//         if (time_modulus != 0)
-//           current_TIME[i - 1] += time_modulus * 60;
-//       }
-
-//       // if (time_modulus > timeTolerance && time_diff > timeTolerance){
-//       //   arduino_sleep();
-//       // }
-//     }
-//   }
-// }
-
 void sensor_cycle(float *temperature_value)
 {
   *temperature_value = sense_temperature();
 
   // Save to sd card code below:
 }
-
-// Set the next alarm
-// void setNextAlarm(void)
-// {
-//   // flags define what calendar component to be checked against the current time in order
-//   // to trigger the alarm - see datasheet
-//   // A1M1 (seconds) (0 to enable, 1 to disable)
-//   // A1M2 (minutes) (0 to enable, 1 to disable)
-//   // A1M3 (hour)    (0 to enable, 1 to disable)
-//   // A1M4 (day)     (0 to enable, 1 to disable)
-//   // DY/DT          (dayofweek == 1/dayofmonth == 0)
-//   uint8_t flags[5] = {0, 0, 0, 1, 1};
-
-//   for (int i = 0; i < 4; i++)
-//   {
-//     wake_TIME[i] = current_TIME[i];
-//     wake_TIME[i] = wake_TIME[i] + wake_intervals[i];
-//   }
-
-//   for (int i = 0; i < 2; i++)
-//   {
-
-//     // calculate second and hour offset
-//     if (wake_intervals[i] != 0)
-//     {
-//       wake_TIME[i] = wake_TIME[i] - wake_TIME[i] % wake_intervals[i];
-//       wake_TIME[i] = wake_TIME[i] + wake_offset[i];
-//     }
-//     else
-//     {
-//       wake_TIME[i] = wake_offset[i];
-//     }
-
-//     // overflow increment for seconds and minutes
-//     if (wake_TIME[i] > 59)
-//     {
-//       wake_TIME[i + 1] = wake_TIME[i + 1] + 1;
-//       wake_TIME[i] = wake_TIME[i] - 60;
-//     }
-//   }
-
-//   // overflow increment for hours
-//   if (wake_TIME[2] > 23)
-//   {
-//     wake_TIME[2] = wake_TIME[2] - 24;
-//   }
-
-//   for (int i = 0; i < 4; i++)
-//   {
-//     current_TIME[i] = wake_TIME[i];
-//   }
-
-//   Serial.println("Next wake time");
-//   Serial.print(wake_TIME[2], DEC);
-//   Serial.print(':');
-//   Serial.print(wake_TIME[1], DEC);
-//   Serial.print(':');
-//   Serial.print(wake_TIME[0], DEC);
-//   Serial.println();
-
-//   delay(5000);
-
-//   // Set the alarm time (but not yet activated)
-//   DS3231_set_a1(wake_TIME[0], wake_TIME[1], wake_TIME[2], 0, flags);
-
-//   // Turn the alarm on
-//   DS3231_set_creg(DS3231_CONTROL_INTCN | DS3231_CONTROL_A1IE);
-// }
 
 void arduino_sleep()
 {
@@ -383,12 +262,12 @@ void motor_motion(uint8_t motor_dir = 1)
 
   if (motor_dir == 1)
   {
-    while (adcValue <= max_adc)
+    while (adcValue >= min_adc)
     {
       analogRead(potentiometer_pin);
 
       // read the input on analog pin 0:
-      adcValue = read_adc();
+      adcValue = analogRead(potentiometer_pin);
 
       digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
       analogWrite(pwm, pwm_value); // Send PWM to output pin
@@ -399,12 +278,12 @@ void motor_motion(uint8_t motor_dir = 1)
   }
   else
   {
-    while (adcValue >= min_adc)
+    while (adcValue <= max_adc)
     {
       analogRead(potentiometer_pin);
 
       // read the input on analog pin 0:
-      adcValue = read_adc();
+      adcValue = analogRead(potentiometer_pin);
 
       digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor
       analogWrite(pwm, pwm_value); // Send PWM to output pin
@@ -419,18 +298,20 @@ void loop()
 {
   float temperature_value;
 
-  check_time(wake_intervals, wake_offset, wake_tolerance);
+  if (check_time(wake_intervals, wake_offset, tolerance_minutes)){
+    Serial.println("Within time tolerance");
+    // Activate motor go down
+    motor_motion(1);
 
-  // Activate motor go down
-  motor_motion(1);
-
-  // sensor cycle code
-  sensor_cycle(&temperature_value);
+    // sensor cycle code
+    sensor_cycle(&temperature_value);
+    // randomSeed(analogRead(A2));
+    // temperature_value = random(25,40);
+    sendDataToServer(temperature_value);
+  }
 
   // Activate motor go up
   motor_motion(0);
-
-  sendDataToServer(temperature_value);
 
   arduino_sleep();
 }

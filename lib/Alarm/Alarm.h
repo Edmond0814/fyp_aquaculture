@@ -21,7 +21,7 @@
 #endif
 
 void getCurrentTime();
-boolean check_time(uint8_t wake_intervals[4], uint8_t wake_offset[2], uint8_t wake_tolerance[3]);
+boolean check_time(uint8_t wake_intervals[4], uint8_t wake_offset[2], uint8_t wake_tolerance);
 void setNextAlarm(uint8_t wake_intervals[4], uint8_t wake_offset[2]);
 
 #endif
