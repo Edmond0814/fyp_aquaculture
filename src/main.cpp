@@ -8,13 +8,13 @@
 #include <String.h>
 #include <Alarm.h>
 
-#define pwm_value 200 // make sure in the range of 0 to 255
-unsigned long long max_adc = 440, min_adc = 300;
+#define pwm_value 200 // make sure in the range of 0 to 255 for motor
+unsigned long long max_adc = 440, min_adc = 290;
 
 // Set wake up intervals using Second, Minute, Hour and Day
 // if alarm wake for every hour, set wake_intervals[4] = {0, 0, 1, 0}
 // if alarm wake for every 15 minutes, set wake_intervals[4] = {0, 15, 0, 0}
-uint8_t wake_intervals[4] = {0, 2, 0, 0};
+uint8_t wake_intervals[4] = {0, 15, 0, 0};
 
 // Set wake up offset using Minute and Second
 // To wake every 15 minutes start from 12:05, set wake_intervals[4] = {0, 0, 15, 0}, wake_offset = {0, 5}
@@ -62,6 +62,44 @@ void setup()
   getCurrentTime();
 
   Serial.println("Setup completed.");
+}
+
+void motor_motion(uint8_t motor_dir = 1)
+{
+  // deploy sensor when motor_dir = 1 and rectract sensor when motor_dir = 9
+
+  if (motor_dir == 1)
+  {
+    while (adcValue >= min_adc)
+    {
+      analogRead(potentiometer_pin);
+
+      // read the input on analog pin 0:
+      adcValue = analogRead(potentiometer_pin);
+
+      digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the bottom");
+    analogWrite(pwm, 0);
+  }
+  else
+  {
+    while (adcValue <= max_adc)
+    {
+      analogRead(potentiometer_pin);
+
+      // read the input on analog pin 0:
+      adcValue = analogRead(potentiometer_pin);
+
+      digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor
+      analogWrite(pwm, pwm_value); // Send PWM to output pin
+    }
+
+    Serial.println("Reached the top!");
+    analogWrite(pwm, 0);
+  }
 }
 
 void sort_array(float *array_value, size_t array_size)
@@ -119,16 +157,11 @@ float sense_temperature()
   return avgValue;
 }
 
-// When wakePin is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
-void sleepISR()
+void sensor_cycle(float *temperature_value)
 {
-  // Prevent sleep mode, so we don't enter it again, except deliberately, by code
-  sleep_disable();
+  *temperature_value = sense_temperature();
 
-  // Detach the interrupt that brought us out of sleep
-  detachInterrupt(digitalPinToInterrupt(wakePin));
-
-  // Now we continue running the main Loop() just after we went to sleep
+  // Save to sd card code below:
 }
 
 String createGetURL(float temperature_value)
@@ -145,11 +178,84 @@ String createGetURL(float temperature_value)
   return stringFull;
 }
 
-void sensor_cycle(float *temperature_value)
+String createThingSpeakURL(float temperature_value)
 {
-  *temperature_value = sense_temperature();
+  randomSeed(analogRead(0));
+  int dioxy = random(50, 100);
+  // int temp = random(20, 35);
 
-  // Save to sd card code below:
+  String stringOne = "AT+HTTPPARA=\"URL\",\"http://api.thingspeak.com/update?api_key=LMDKI99A62C3F77X&field1=";
+  String stringTwo = "&field2=";
+  String stringThree = "\"";
+  String stringFull = stringOne + temperature_value + stringTwo + dioxy + stringThree;
+
+  return stringFull;
+}
+
+void sendGSM(const char *msg, int waitMs = 500)
+{
+  GSM.println(msg);
+  while (GSM.available())
+  {
+    Serial.write(char(GSM.read())); /* Print character received on to the serial monitor */
+    // Serial.println(GSM.read());
+  }
+  delay(waitMs);
+}
+
+void sendDataToServer(float temperature_value)
+{
+  String getURL = createGetURL(temperature_value);
+  String ThingSpeak = createThingSpeakURL(temperature_value);
+
+  sendGSM("AT+SAPBR=3,1,\"APN\",\"yoodo\"");
+  sendGSM("AT+SAPBR=1,1", 3000);
+  sendGSM("AT+SAPBR=2,1", 3000);
+  sendGSM("AT+HTTPINIT");
+  sendGSM("AT+HTTPPARA=\"CID\",1");
+
+  GSM.println(getURL);
+  while (GSM.available())
+  {
+    GSM.read();
+  }
+  delay(2000);
+
+  sendGSM("AT+HTTPACTION=0");
+  GSM.read();
+  delay(2000);
+
+  GSM.println(ThingSpeak);
+  while (GSM.available())
+  {
+    GSM.read();
+  }
+  delay(2000);
+
+  sendGSM("AT+HTTPACTION=0");
+  GSM.read();
+  delay(2000);
+
+  sendGSM("AT+HTTPACTION=0");
+  GSM.read();
+
+  sendGSM("AT+HTTPTERM");
+  GSM.read();
+
+  sendGSM("AT+SAPBR=0,1");
+  GSM.read();
+}
+
+// When wakePin is brought LOW this interrupt is triggered FIRST (even in PWR_DOWN sleep)
+void sleepISR()
+{
+  // Prevent sleep mode, so we don't enter it again, except deliberately, by code
+  sleep_disable();
+
+  // Detach the interrupt that brought us out of sleep
+  detachInterrupt(digitalPinToInterrupt(wakePin));
+
+  // Now we continue running the main Loop() just after we went to sleep
 }
 
 void arduino_sleep()
@@ -216,82 +322,6 @@ void arduino_sleep()
   ADCSRA = prevADCSRA;
 
   return;
-}
-
-void sendGSM(const char *msg, int waitMs = 500)
-{
-  GSM.println(msg);
-  while (GSM.available())
-  {
-    Serial.write(char(GSM.read())); /* Print character received on to the serial monitor */
-    // Serial.println(GSM.read());
-  }
-  delay(waitMs);
-}
-
-void sendDataToServer(float temperature_value)
-{
-  String getURL = createGetURL(temperature_value);
-
-  sendGSM("AT+SAPBR=3,1,\"APN\",\"yoodo\"");
-  sendGSM("AT+SAPBR=1,1", 3000);
-  sendGSM("AT+SAPBR=2,1", 3000);
-  sendGSM("AT+HTTPINIT");
-  sendGSM("AT+HTTPPARA=\"CID\",1");
-
-  GSM.println(getURL);
-  while (GSM.available())
-  {
-    GSM.read();
-  }
-  delay(500);
-
-  sendGSM("AT+HTTPACTION=0");
-  GSM.read();
-
-  sendGSM("AT+HTTPTERM");
-  GSM.read();
-
-  sendGSM("AT+SAPBR=0,1");
-  GSM.read();
-}
-
-void motor_motion(uint8_t motor_dir = 1)
-{
-  // deploy sensor when motor_dir = 1 and rectract sensor when motor_dir = 9
-
-  if (motor_dir == 1)
-  {
-    while (adcValue >= min_adc)
-    {
-      analogRead(potentiometer_pin);
-
-      // read the input on analog pin 0:
-      adcValue = analogRead(potentiometer_pin);
-
-      digitalWrite(dir, LOW);      // rotate anticlockwise to drop the sensor
-      analogWrite(pwm, pwm_value); // Send PWM to output pin
-    }
-
-    Serial.println("Reached the bottom");
-    analogWrite(pwm, 0);
-  }
-  else
-  {
-    while (adcValue <= max_adc)
-    {
-      analogRead(potentiometer_pin);
-
-      // read the input on analog pin 0:
-      adcValue = analogRead(potentiometer_pin);
-
-      digitalWrite(dir, HIGH);     // rotate anticlockwise to drop the sensor
-      analogWrite(pwm, pwm_value); // Send PWM to output pin
-    }
-
-    Serial.println("Reached the top!");
-    analogWrite(pwm, 0);
-  }
 }
 
 void loop()
